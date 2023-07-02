@@ -14,6 +14,7 @@ CSV_PATH = BASE_PATH / "csv"
 TABLES = {
     "comment_headers",
     "comment_votes",
+    "comments",
     "hidden_posts",
     "message_headers",
     "messages",
@@ -48,7 +49,7 @@ def populate_table(engine: sql.Engine, table: str) -> None:
     with engine.connect() as db:
         # pandas' ``to_sql`` cannot do upserts, so we use pangres
         pangres.upsert(  # type: ignore
-            con=db, df=df, table_name=table, if_row_exists="update", chunksize=2000
+            con=db, df=df, table_name=table, if_row_exists="ignore", chunksize=2000
         )
         db.commit()
 
