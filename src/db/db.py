@@ -34,6 +34,13 @@ def get_query(query_name: str) -> Generator[sql.TextClause, None, None]:
         yield sql.sql.text(query)
 
 
+def create_tables(engine: sql.Engine) -> None:
+    with engine.connect() as db:
+        for query in get_query("create_table"):
+            db.execute(query)
+        db.commit()
+
+
 def populate_table(engine: sql.Engine, table: str) -> None:
     # The relevant CSV files have the first column as the index
     df = pd.read_csv(CSV_PATH / f"{table}.csv", index_col=0)  # type: ignore
@@ -51,10 +58,7 @@ def populate_all_tables(engine: sql.Engine) -> None:
         populate_table(engine, table)
 
 
-def test(db_path: str | Path = DB_PATH) -> None:
+def update_db(db_path: str | Path = DB_PATH) -> None:
     engine = sql.create_engine(rf"sqlite:///{db_path}")
+    create_tables(engine)
     populate_all_tables(engine)
-
-
-if __name__ == "__main__":
-    test()
