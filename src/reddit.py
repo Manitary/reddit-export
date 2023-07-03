@@ -54,17 +54,4 @@ def download_reddit_gallery(post: Submission, path: Path, name: str) -> None:
             )
         ext: str = match.group(1)
         url = GALLERY_IMG.format(img=item_id, ext=ext)
-        r = requests.get(url, timeout=DEFAULT_TIMEOUT, stream=True)
-        if not r.ok:
-            raise ConnectionError(
-                f"Failed retrieving Reddit gallery {post.id} image {item_id}"
-            )
-        file_path = path / name / f"{num}.{ext}"
-        file_path = fix_file_path(file_path)
-        if file_path.is_file():
-            print("The picture already exists")
-            continue
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with file_path.open("wb") as f:
-            r.raw.decode_content = True
-            shutil.copyfileobj(r.raw, f)
+        download_reddit_image(url=url, path=path / name, name=str(num))
