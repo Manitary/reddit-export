@@ -12,6 +12,8 @@ import ratelimit
 import requests
 from dotenv import load_dotenv
 
+from utils import fix_file_path
+
 load_dotenv()
 
 CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")
@@ -65,6 +67,7 @@ def download_special(image_url: str, path: Path) -> None:
     r = requests.get(url=image_url, timeout=DEFAULT_TIMEOUT, stream=True)
     if not r.ok:
         raise ConnectionError(f"Image {image_url} failed. Status code: {r.status_code}")
+    path = fix_file_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as f:
         r.raw.decode_content = True
@@ -103,6 +106,7 @@ def download_image(image_url: str, file_path: Path) -> None:
     r = requests.get(url=image_url, timeout=DEFAULT_TIMEOUT, stream=True)
     if not r.ok:
         raise ConnectionError(f"Image {image_url} failed. Status code: {r.status_code}")
+    file_path = fix_file_path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("wb") as f:
         r.raw.decode_content = True

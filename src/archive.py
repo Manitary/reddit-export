@@ -3,7 +3,6 @@ import re
 import sqlite3
 from functools import partial
 from pathlib import Path
-from sys import exc_info
 
 import praw
 from dotenv import load_dotenv
@@ -14,6 +13,7 @@ from ratelimit import limits, sleep_and_retry
 import imgur
 import reddit
 from db.db import DB_PATH
+from utils import fix_file_path, slugify
 
 load_dotenv()
 
@@ -28,28 +28,11 @@ PATH_UPVOTED_COMMENT = PATH_UPVOTED / "comments"
 
 IMGUR_LINK = re.compile(r"imgur\.com")
 REDDIT_IMG_LINK = re.compile(r"i\.redd\.it")
-
-INVALID_CHARS = {
-    "<": "[",
-    ">": "]",
-    ":": " -",
-    '"': "'",
-    "/": "-",
-    "\\": "-",
-    "|": "--",
-    "?": "",
-    "*": " ",
-}
+REDDIT_VIDEO_LINK = re.compile(r"v\.redd\.it")
 
 
 class DeletedPostError(Exception):
     ...
-
-
-def slugify(string: str) -> str:
-    for char, sub in INVALID_CHARS.items():
-        string = string.replace(char, sub)
-    return string
 
 
 @sleep_and_retry
@@ -85,6 +68,7 @@ def save_text_post(post: Submission, path: Path, name: str) -> None:
     if body == "[removed]":
         raise DeletedPostError
     file_path = path / f"{name}.txt"
+    file_path = fix_file_path(file_path)
     if file_path.is_file():
         print("Text post already archived")
         return
@@ -100,6 +84,9 @@ def save_link_post(post: Submission, path: Path, name: str) -> bool:
         return True
     if REDDIT_IMG_LINK.search(link):
         reddit.download_reddit_image(url=link, path=path, name=name)
+        return True
+    if REDDIT_VIDEO_LINK.search(link):
+        reddit.download_reddit_video(url=link, path=path, name=name)
         return True
     return False
 
