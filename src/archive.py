@@ -29,6 +29,7 @@ PATH_UPVOTED_COMMENT = PATH_UPVOTED / "comments"
 IMGUR_LINK = re.compile(r"imgur\.com")
 REDDIT_IMG_LINK = re.compile(r"i\.redd\.it")
 REDDIT_VIDEO_LINK = re.compile(r"v\.redd\.it")
+REDDIT_GALLERY_LINK = re.compile(r"reddit\.com/gallery/")
 
 
 class DeletedPostError(Exception):
@@ -87,6 +88,9 @@ def save_link_post(post: Submission, path: Path, name: str) -> bool:
         return True
     if REDDIT_VIDEO_LINK.search(link):
         reddit.download_reddit_video(url=link, path=path, name=name)
+        return True
+    if REDDIT_GALLERY_LINK.search(link):
+        reddit.download_reddit_gallery(post=post, path=path, name=name)
         return True
     return False
 
