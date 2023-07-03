@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 from praw.models import Submission
 from prawcore.exceptions import Forbidden, NotFound
 from ratelimit import limits, sleep_and_retry
+from yt_dlp import DownloadError
 
+import youtube
 import imgur
 import reddit
 from db.db import DB_PATH
@@ -30,6 +32,8 @@ IMGUR_LINK = re.compile(r"imgur\.com")
 REDDIT_IMG_LINK = re.compile(r"i\.redd\.it")
 REDDIT_VIDEO_LINK = re.compile(r"v\.redd\.it")
 REDDIT_GALLERY_LINK = re.compile(r"reddit\.com/gallery/")
+YOUTUBE_LINK = re.compile(r"(?:youtube\.com|youtu\.be)")
+YOUTUBE_PLAYLIST_LINK = re.compile(r"youtube\.com/watch\?(.*)list=\w(.*)")
 
 
 class DeletedPostError(Exception):
@@ -92,6 +96,12 @@ def save_link_post(post: Submission, path: Path, name: str) -> bool:
     if REDDIT_GALLERY_LINK.search(link):
         reddit.download_reddit_gallery(post=post, path=path, name=name)
         return True
+    if YOUTUBE_LINK.search(link):
+        if YOUTUBE_PLAYLIST_LINK.search(link):
+            youtube.download_youtube_playlist(url=link, path=path, name=name)
+        else:
+            youtube.download_youtube_video(url=link, path=path, name=name)
+        return True
     return False
 
 
@@ -123,26 +133,38 @@ def archive_post_upvoted(reddit: praw.Reddit, db_path: str | Path = DB_PATH) -> 
                 db.commit()
             except DeletedPostError:
                 # failed archival - deleted post
+                error = "'deleted'"
                 db.execute(
                     "UPDATE post_votes SET archived = 2 WHERE id = ?", (post_id,)
                 )
                 db.execute(
                     """INSERT INTO archive_errors (id, permalink, error)
-                        VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = 'deleted'""",
-                    (post_id, post_link, "deleted"),
+                        VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    (post_id, post_link, error, error),
                 )
                 db.commit()
             except Forbidden:
                 # failed archival - private post
+                error = "403"
                 db.execute(
                     "UPDATE post_votes SET archived = 2 WHERE id = ?", (post_id,)
                 )
                 db.execute(
                     """INSERT INTO archive_errors (id, permalink, error)
-                        VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = '403'""",
-                    (post_id, post_link, "403"),
+                        VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    (post_id, post_link, error, error),
                 )
                 db.commit()
+            except DownloadError:
+                # failed Youtube download
+                error = "Youtube video deleted"
+                db.execute(
+                    "UPDATE post_votes SET archived = 2 WHERE id = ?", (post_id,)
+                )
+                db.execute(
+                    """INSERT INTO archive_errors (id, permalink, error) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    (post_id, post_link, error, error),
+                )
 
 
 def main() -> None:
