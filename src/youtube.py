@@ -1,7 +1,8 @@
 from pathlib import Path
-from utils import fix_file_path
+
 import yt_dlp
-from utils import MAX_PATH_LEN
+
+from utils import MAX_PATH_LEN, fix_file_path
 
 
 def download_youtube_video(url: str, path: Path, name: str) -> None:
