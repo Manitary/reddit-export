@@ -1,16 +1,17 @@
 import re
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import requests
 
-from utils import fix_file_path
+from ..exceptions import FailedDownloadError
+from ..utils import fix_file_path
 
 FILE_EXT = re.compile(r".*\.(\w+)$")
 DEFAULT_TIMEOUT = 60
 
 
-def download_image(url: str, path: Path, name: str, ext: str = "jpg") -> None:
+def download_image(url: str, path: Path, name: str, ext: str = "") -> None:
     if not ext:
         match = FILE_EXT.match(url)
         if not match:
@@ -23,7 +24,7 @@ def download_image(url: str, path: Path, name: str, ext: str = "jpg") -> None:
         return
     r = requests.get(url=url, timeout=DEFAULT_TIMEOUT, stream=True)
     if not r.ok:
-        raise ConnectionError(f"Image {url} failed. Status code: {r.status_code}")
+        raise FailedDownloadError(url=url, code=r.status_code)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("wb") as f:
         r.raw.decode_content = True

@@ -13,7 +13,8 @@ import ratelimit
 import requests
 from dotenv import load_dotenv
 
-from utils import fix_file_path
+from ..exceptions import FailedDownloadError
+from ..utils import fix_file_path
 
 load_dotenv()
 
@@ -67,7 +68,7 @@ def download_special(image_url: str, path: Path) -> None:
         image_url = f"https://{image_url}"
     r = requests.get(url=image_url, timeout=DEFAULT_TIMEOUT, stream=True)
     if not r.ok:
-        raise ConnectionError(f"Image {image_url} failed. Status code: {r.status_code}")
+        raise FailedDownloadError(image_url, r.status_code)
     path = fix_file_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as f:
@@ -83,7 +84,7 @@ def download_image_data(image_id: str) -> tuple[str, str]:
         timeout=DEFAULT_TIMEOUT,
     )
     if not r.ok:
-        raise ConnectionError(f"Image {url} failed. Status code: {r.status_code}")
+        raise FailedDownloadError(url, r.status_code)
     data = r.json()["data"]
     url: str = data["link"]
     match = FILE_TYPE.search(data["type"])
@@ -106,7 +107,7 @@ def download_image(image_url: str, file_path: Path) -> None:
         return
     r = requests.get(url=image_url, timeout=DEFAULT_TIMEOUT, stream=True)
     if not r.ok:
-        raise ConnectionError(f"Image {image_url} failed. Status code: {r.status_code}")
+        raise FailedDownloadError(image_url, r.status_code)
     file_path = fix_file_path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with file_path.open("wb") as f:
@@ -122,7 +123,7 @@ def download_album(album_id: str, path: Path) -> None:
         timeout=DEFAULT_TIMEOUT,
     )
     if not r.ok:
-        raise ConnectionError(f"Album {url} failed. Status code: {r.status_code}")
+        raise FailedDownloadError(url, r.status_code)
 
     album_data = r.json()["data"]
     for num, image in enumerate(album_data["images"], 1):
@@ -142,8 +143,6 @@ def download_album(album_id: str, path: Path) -> None:
         )
         try:
             download_image(image_url=image_url, file_path=file_path)
-        except ConnectionError as e:
-            raise ConnectionError() from e
         except ValueError as e:
             raise ValueError() from e
 
@@ -154,18 +153,18 @@ def download_gallery(gallery_id: str, path: Path, file_name: str) -> None:
     Imgur gallery IDs (usually) may behave as either regular image IDs
     or as regular album IDs.
 
-    Raise ConnectionError if neither works."""
+    Raise FailedDownloadError if neither works."""
     try:
         url, ext = download_image_data(gallery_id)
         file_path = path / f"{file_name}.{ext}"
         download_image(url, file_path)
         return
-    except ConnectionError:
+    except FailedDownloadError:
         pass
     try:
         album_path = path / file_name
         download_album(gallery_id, album_path)
         return
-    except ConnectionError:
+    except FailedDownloadError:
         pass
-    raise ConnectionError()
+    # raise FailedDownloadError(f"Imgur gallery {gallery_id}", "Unknown")
