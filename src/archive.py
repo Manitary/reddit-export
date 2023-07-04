@@ -11,6 +11,8 @@ from prawcore.exceptions import Forbidden, NotFound
 from ratelimit import limits, sleep_and_retry
 from yt_dlp import DownloadError
 
+import videos
+import images
 import youtube
 import imgur
 import reddit
@@ -34,22 +36,40 @@ REDDIT_VIDEO_LINK = re.compile(r"v\.redd\.it")
 REDDIT_GALLERY_LINK = re.compile(r"reddit\.com/gallery/")
 YOUTUBE_LINK = re.compile(r"(?:youtube\.com|youtu\.be)")
 YOUTUBE_PLAYLIST_LINK = re.compile(r"youtube\.com/watch\?(.*)list=\w(.*)")
+IMAGE_GENERAL_LINK = re.compile(r".*\.(jpg|png|jpeg|gif)(?:\?.*)?$")
+STREAMABLE_LINK = re.compile(r"streamable\.com")
+GFYCAT_LINK = re.compile(r"gfycat\.com")
+MAL_IMAGE = re.compile(r"image\.myanimelist\.net")
+PIXIV_IMAGE = re.compile(r"pixiv\.net|i\.pximg\.net")
+TWITTER_IMAGE = re.compile(r"pbs.twimg.com")
 
 
 class DeletedPostError(Exception):
     ...
 
 
+class PixivError(Exception):
+    ...
+
+
+class MissingLinkError(Exception):
+    ...
+
+
+class NotMediaError(Exception):
+    ...
+
+
 @sleep_and_retry
 @limits(calls=60, period=60)
-def get_submission(reddit: praw.Reddit, post_id: str) -> Submission:
-    return reddit.submission(post_id)
+def get_submission(r: praw.Reddit, post_id: str) -> Submission:
+    return r.submission(post_id)
 
 
-def save_post(reddit: praw.Reddit, post_id: str, path: Path) -> bool:
-    post: Submission = get_submission(reddit, post_id)
+def save_post(r: praw.Reddit, post_id: str, path: Path) -> bool:
+    post: Submission = get_submission(r, post_id)
     try:
-        post: Submission = get_submission(reddit, post.crosspost_parent[3:])
+        post: Submission = get_submission(r, post.crosspost_parent[3:])
     except (AttributeError, NotFound):
         # The post is not a crosspost
         pass
@@ -60,11 +80,8 @@ def save_post(reddit: praw.Reddit, post_id: str, path: Path) -> bool:
         save_text_post(post=post, path=path / sub_name, name=full_title)
         return True
     # link post
-    try:
-        if save_link_post(post=post, path=path / sub_name, name=full_title):
-            return True
-    except (ConnectionError, ValueError) as e:
-        print(e)
+    if save_link_post(post=post, path=path / sub_name, name=full_title):
+        return True
     return False
 
 
@@ -82,8 +99,22 @@ def save_text_post(post: Submission, path: Path, name: str) -> None:
         f.write(body)
 
 
+def save_not_media_post(url: str, path: Path, name: str) -> None:
+    file_path = path / f"{name}.txt"
+    file_path = fix_file_path(file_path)
+    if file_path.is_file():
+        print("Post URL already archived")
+        return
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with file_path.open("w", encoding="utf-8") as f:
+        f.write(url)
+    raise NotMediaError(f"Unrecognised media URL: {url}")
+
+
 def save_link_post(post: Submission, path: Path, name: str) -> bool:
     link: str = post.url
+    if not link:
+        raise MissingLinkError()
     if IMGUR_LINK.search(link):
         imgur.download_imgur_link(url=link, path=path, file_name=name)
         return True
@@ -102,23 +133,39 @@ def save_link_post(post: Submission, path: Path, name: str) -> bool:
         else:
             youtube.download_youtube_video(url=link, path=path, name=name)
         return True
-    return False
+    if PIXIV_IMAGE.search(link):
+        raise PixivError("Require Pixiv login")
+    if GFYCAT_LINK.search(link) or STREAMABLE_LINK.search(link):
+        videos.download_video(url=link, path=path, name=name)
+        return True
+    if MAL_IMAGE.search(link) or TWITTER_IMAGE.search(link):
+        images.download_image(url=link, path=path, name=name)
+        return True
+    if ext := IMAGE_GENERAL_LINK.match(link):
+        images.download_image(url=link, path=path, name=name, ext=ext.group(1))
+        return True
+    print(link)
+    save_not_media_post(url=link, path=path, name=name)
 
 
 save_post_saved = partial(save_post, path=PATH_SAVED_POST)
 save_post_upvoted = partial(save_post, path=PATH_UPVOTED_POST)
 
 
-def archive_post_upvoted(reddit: praw.Reddit, db_path: str | Path = DB_PATH) -> None:
+def archive_post_upvoted(r: praw.Reddit, db_path: str | Path = DB_PATH) -> None:
     with sqlite3.connect(db_path) as db:
         ids = db.execute(
             "SELECT id, permalink FROM post_votes WHERE direction = 'up' AND archived = 0"
         )
-        while ids:
-            post_id, post_link = ids.fetchone()
+        while True:
+            try:
+                post_id, post_link = ids.fetchone()
+            except TypeError:
+                print("Finished")
+                break
             print(f"Processing {post_id}")
             try:
-                if save_post_upvoted(reddit=reddit, post_id=post_id):
+                if save_post_upvoted(r=r, post_id=post_id):
                     # successfully archived
                     db.execute(
                         "UPDATE post_votes SET archived = 1 WHERE id = ?",
@@ -162,20 +209,70 @@ def archive_post_upvoted(reddit: praw.Reddit, db_path: str | Path = DB_PATH) -> 
                     "UPDATE post_votes SET archived = 2 WHERE id = ?", (post_id,)
                 )
                 db.execute(
-                    """INSERT INTO archive_errors (id, permalink, error) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    """INSERT INTO archive_errors (id, permalink, error)
+                    VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
                     (post_id, post_link, error, error),
                 )
+                db.commit()
+            except PixivError:
+                # requires to implement Pixiv login
+                error = "Pixiv login required"
+                db.execute(
+                    "UPDATE post_votes SET archived = 2 WHERE id = ?", (post_id,)
+                )
+                db.execute(
+                    """INSERT INTO archive_errors (id, permalink, error)
+                    VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    (post_id, post_link, error, error),
+                )
+                db.commit()
+            except MissingLinkError:
+                # link post without an URL attached
+                error = "Missing link"
+                db.execute(
+                    "UPDATE post_votes SET archived = 2 WHERE id = ?", (post_id,)
+                )
+                db.execute(
+                    """INSERT INTO archive_errors (id, permalink, error)
+                    VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    (post_id, post_link, error, error),
+                )
+                db.commit()
+            except ConnectionError as e:
+                # failed to retrieve contents
+                error = e.args[0]
+                db.execute(
+                    "UPDATE post_votes SET archived = 2 WHERE id = ?", (post_id,)
+                )
+                db.execute(
+                    """INSERT INTO archive_errors (id, permalink, error)
+                    VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    (post_id, post_link, error, error),
+                )
+                db.commit()
+            except NotMediaError as e:
+                # unrecognised media type (e.g. URL pointing to a news article)
+                error = e.args[0]
+                db.execute(
+                    "UPDATE post_votes SET archived = 3 WHERE id = ?", (post_id,)
+                )
+                db.execute(
+                    """INSERT INTO archive_errors (id, permalink, error)
+                    VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
+                    (post_id, post_link, error, error),
+                )
+                db.commit()
 
 
 def main() -> None:
-    reddit = praw.Reddit(
+    r = praw.Reddit(
         client_id=os.environ.get("REDDIT_CLIENT_ID"),
         client_secret=os.environ.get("REDDIT_SECRET"),
         user_agent=os.environ.get("REDDIT_USER_AGENT"),
         username=os.environ.get("REDDIT_USERNAME"),
         password=os.environ.get("REDDIT_USER_PASSWORD"),
     )
-    archive_post_upvoted(reddit)
+    archive_post_upvoted(r)
 
 
 if __name__ == "__main__":
