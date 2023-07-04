@@ -147,24 +147,27 @@ def archive_table(r: praw.Reddit, table: str, db_path: str | Path = DB_PATH) -> 
             print(f"Processing {post_id}")
             try:
                 save_post(r=r, post_id=post_id, path=PATH_TABLE[table])
-                db.execute(
-                    f"UPDATE {table} SET archived = 1 WHERE id = ?",
-                    (post_id,),
-                )
+                db.execute(f"UPDATE {table} SET archived = 1 WHERE id = ?", (post_id,))
+                db.execute("DELETE FROM archive_errors WHERE id = ?", (post_id,))
                 db.commit()
                 print("Archive successful")
             except ArchiveError as e:
                 db.execute(
-                    f"UPDATE {table} SET archived = ? WHERE id = ?",
-                    (e.code, post_id),
+                    f"UPDATE {table} SET archived = ? WHERE id = ?", (e.code, post_id)
                 )
                 db.execute(
                     """INSERT INTO archive_errors (id, permalink, error, link)
-                    VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET error = ?""",
-                    (post_id, post_link, e.error, e.url, e.error),
+                    VALUES (:id, :permalink, :error, :link)
+                    ON CONFLICT DO UPDATE SET error = :error, link = :link""",
+                    {
+                        "id": post_id,
+                        "permalink": post_link,
+                        "error": e.error,
+                        "link": e.url,
+                    },
                 )
                 db.commit()
-                print(f"Download failed: {e.__class__}")
+                print(f"Download failed: {e.__class__.__name__}")
 
 
 def main(update: bool = False) -> None:
