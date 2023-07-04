@@ -1,7 +1,8 @@
 """Handle download of imgur links.
 
-Imgur groups together GIFs and MP4s (it converts GIFs to MP4s when uploading, and makes either link available).
-Since it is not possible to distinguish the origin of the file, MP4 is set by default, since GIFs will not always play correctly (based on empirical test)."""
+Imgur converts GIFs to MP4s when uploading, and makes either version available.
+Since it is not possible to distinguish the origin of the file, we set MP4 by default, 
+as GIFs will not always play correctly (based on empirical test)."""
 
 import os
 import re
@@ -142,9 +143,9 @@ def download_album(album_id: str, path: Path) -> None:
         try:
             download_image(image_url=image_url, file_path=file_path)
         except ConnectionError as e:
-            raise ConnectionError from e
+            raise ConnectionError() from e
         except ValueError as e:
-            raise ValueError from e
+            raise ValueError() from e
 
 
 def download_gallery(gallery_id: str, path: Path, file_name: str) -> None:
@@ -167,4 +168,4 @@ def download_gallery(gallery_id: str, path: Path, file_name: str) -> None:
         return
     except ConnectionError:
         pass
-    raise ConnectionError
+    raise ConnectionError()

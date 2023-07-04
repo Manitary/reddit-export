@@ -71,7 +71,7 @@ def save_post(reddit: praw.Reddit, post_id: str, path: Path) -> bool:
 def save_text_post(post: Submission, path: Path, name: str) -> None:
     body: str = post.selftext
     if body == "[removed]":
-        raise DeletedPostError
+        raise DeletedPostError()
     file_path = path / f"{name}.txt"
     file_path = fix_file_path(file_path)
     if file_path.is_file():
