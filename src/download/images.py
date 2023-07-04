@@ -4,8 +4,8 @@ from pathlib import Path
 
 import requests
 
-from ..exceptions import FailedDownloadError
-from ..utils import fix_file_path
+from exceptions import FailedDownloadError
+from utils import fix_file_path
 
 FILE_EXT = re.compile(r".*\.(\w+)$")
 DEFAULT_TIMEOUT = 60

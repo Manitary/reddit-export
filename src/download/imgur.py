@@ -13,8 +13,8 @@ import ratelimit
 import requests
 from dotenv import load_dotenv
 
-from ..exceptions import FailedDownloadError
-from ..utils import fix_file_path
+from exceptions import FailedDownloadError
+from utils import fix_file_path
 
 load_dotenv()
 

@@ -2,8 +2,8 @@ from pathlib import Path
 
 import yt_dlp
 
-from ..exceptions import VideoDownloadError
-from ..utils import MAX_PATH_LEN, fix_file_path
+from exceptions import VideoDownloadError
+from utils import MAX_PATH_LEN, fix_file_path
 
 
 def download_video(url: str, path: Path, name: str) -> None:

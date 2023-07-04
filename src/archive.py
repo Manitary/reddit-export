@@ -9,9 +9,9 @@ from praw.models import Submission
 from prawcore.exceptions import Forbidden
 from ratelimit import limits, sleep_and_retry
 
-from .db.db import DB_PATH, update_db
-from .download import images, imgur, reddit, videos
-from .exceptions import (
+from db.db import DB_PATH, update_db
+from download import images, imgur, reddit, videos
+from exceptions import (
     ArchiveError,
     DeletedPostError,
     MissingLinkError,
@@ -19,7 +19,7 @@ from .exceptions import (
     PixivError,
     PrivatePostError,
 )
-from .utils import fix_file_path, slugify
+from utils import fix_file_path, slugify
 
 load_dotenv()
 
