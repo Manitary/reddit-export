@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS saved_posts (
 CREATE TABLE IF NOT EXISTS archive_errors (
     id TEXT PRIMARY KEY,
     permalink TEXT UNIQUE,
+    table TEXT,
     error TEXT,
     link TEXT DEFAULT NULL
 );

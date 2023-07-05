@@ -10,6 +10,7 @@ from prawcore.exceptions import Forbidden
 from ratelimit import limits, sleep_and_retry
 
 from db.db import DB_PATH, update_db
+from db.tables import TABLES, Table
 from download import images, imgur, reddit, videos
 from exceptions import (
     ArchiveError,
@@ -22,14 +23,6 @@ from exceptions import (
 from utils import fix_file_path, slugify
 
 load_dotenv()
-
-PATH_DATA = Path().resolve() / "data"
-PATH_TABLE = {
-    "post_votes": PATH_DATA / "upvoted" / "posts",
-    "saved_posts": PATH_DATA / "saved" / "posts",
-    "comment_votes": PATH_DATA / "upvoted" / "comments",
-    "saved_comments": PATH_DATA / "saved" / "comments",
-}
 
 IMGUR_LINK = re.compile(r"imgur\.com")
 REDDIT_IMG_LINK = re.compile(r"i\.redd\.it")
@@ -135,33 +128,28 @@ def save_link_post(post: Submission, path: Path, name: str) -> None:
     save_not_media_post(url=link, path=path, name=name)
 
 
-def archive_table(r: praw.Reddit, table: str, db_path: str | Path = DB_PATH) -> None:
-    if table not in PATH_TABLE:
-        raise ValueError("Invalid table name")
+def archive_table(r: praw.Reddit, table: Table, db_path: str | Path = DB_PATH) -> None:
     with sqlite3.connect(db_path) as db:
-        entries = db.execute(
-            f"SELECT id, permalink FROM {table} WHERE direction = 'up' AND archived = 0",
-        ).fetchall()
+        entries = db.execute(table.get_query).fetchall()
         for entry in entries:
             post_id, post_link = entry
             print(f"Processing {post_id}")
             try:
-                save_post(r=r, post_id=post_id, path=PATH_TABLE[table])
-                db.execute(f"UPDATE {table} SET archived = 1 WHERE id = ?", (post_id,))
-                db.execute("DELETE FROM archive_errors WHERE id = ?", (post_id,))
+                save_post(r=r, post_id=post_id, path=table.path)
+                db.execute(table.success_query, {"id": post_id})
+                db.execute("DELETE FROM archive_errors WHERE id = :id", {"id": post_id})
                 db.commit()
                 print("Archive successful")
             except ArchiveError as e:
+                db.execute(table.fail_query, {"id": post_id, "fail_code": e.code})
                 db.execute(
-                    f"UPDATE {table} SET archived = ? WHERE id = ?", (e.code, post_id)
-                )
-                db.execute(
-                    """INSERT INTO archive_errors (id, permalink, error, link)
-                    VALUES (:id, :permalink, :error, :link)
-                    ON CONFLICT DO UPDATE SET error = :error, link = :link""",
+                    """INSERT INTO archive_errors (id, permalink, table_name, error, link)
+                    VALUES (:id, :permalink, :table, :error, :link)
+                    ON CONFLICT DO UPDATE SET error = :error, link = :link, table_name = :table""",
                     {
                         "id": post_id,
                         "permalink": post_link,
+                        "table": table.name,
                         "error": e.error,
                         "link": e.url,
                     },
@@ -180,7 +168,7 @@ def main(update: bool = False) -> None:
         username=os.environ.get("REDDIT_USERNAME"),
         password=os.environ.get("REDDIT_USER_PASSWORD"),
     )
-    archive_table(r, table="post_votes")
+    archive_table(r, table=TABLES["saved_posts"])
 
 
 if __name__ == "__main__":
