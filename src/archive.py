@@ -11,13 +11,12 @@ from ratelimit import limits, sleep_and_retry
 
 from db.db import DB_PATH, update_db
 from db.tables import TABLES, Table
-from download import images, imgur, reddit, videos
+from download import dispatcher
 from exceptions import (
     ArchiveError,
     DeletedPostError,
     MissingLinkError,
     NotMediaError,
-    PixivError,
     PrivatePostError,
 )
 from utils import fix_file_path, slugify
@@ -96,79 +95,56 @@ def save_link_post(post: Submission, path: Path, name: str) -> None:
     link: str = post.url
     if not link:
         raise MissingLinkError()
-    if PIXIV_IMAGE.search(link):
-        raise PixivError(link)
-    if IMGUR_LINK.search(link):
-        imgur.download_imgur_link(url=link, path=path, file_name=name)
-        return
-    if REDDIT_IMG_LINK.search(link):
-        images.download_image(url=link, path=path, name=name)
-        return
-    if REDDIT_GALLERY_LINK.search(link):
-        reddit.download_reddit_gallery(post=post, path=path, name=name)
-        return
-    if YOUTUBE_PLAYLIST_LINK.search(link):
-        videos.download_youtube_playlist(url=link, path=path, name=name)
-        return
-    if (
-        REDDIT_VIDEO_LINK.search(link)
-        or YOUTUBE_LINK.search(link)
-        or GFYCAT_LINK.search(link)
-        or STREAMABLE_LINK.search(link)
-    ):
-        videos.download_video(url=link, path=path, name=name)
-        return
-    if MAL_IMAGE.search(link) or TWITTER_IMAGE.search(link):
-        images.download_image(url=link, path=path, name=name, ext="jpg")
-        return
-    if ext := IMAGE_GENERAL_LINK.match(link):
-        images.download_image(url=link, path=path, name=name, ext=ext.group(1))
-        return
     print(link)
+    if dispatcher.save_link(post, path, name, link):
+        return
     save_not_media_post(url=link, path=path, name=name)
 
 
-def archive_table(r: praw.Reddit, table: Table, db_path: str | Path = DB_PATH) -> None:
-    with sqlite3.connect(db_path) as db:
-        entries = db.execute(table.get_query).fetchall()
-        for entry in entries:
-            post_id, post_link = entry
-            print(f"Processing {post_id}")
-            try:
-                save_post(r=r, post_id=post_id, path=table.path)
-                db.execute(table.success_query, {"id": post_id})
-                db.execute("DELETE FROM archive_errors WHERE id = :id", {"id": post_id})
-                db.commit()
-                print("Archive successful")
-            except ArchiveError as e:
-                db.execute(table.fail_query, {"id": post_id, "fail_code": e.code})
-                db.execute(
-                    """INSERT INTO archive_errors (id, permalink, table_name, error, link)
-                    VALUES (:id, :permalink, :table, :error, :link)
-                    ON CONFLICT DO UPDATE SET error = :error, link = :link, table_name = :table""",
-                    {
-                        "id": post_id,
-                        "permalink": post_link,
-                        "table": table.name,
-                        "error": e.error,
-                        "link": e.url,
-                    },
-                )
-                db.commit()
-                print(f"Download failed: {e.__class__.__name__}")
+def archive_table(
+    db: sqlite3.Connection,
+    reddit: praw.Reddit,
+    table: Table,
+) -> None:
+    for entry in db.execute(table.get_query).fetchall():
+        post_id, post_link = entry
+        print(f"Processing {post_id}")
+        try:
+            save_post(r=reddit, post_id=post_id, path=table.path)
+            db.execute(table.success_query, {"id": post_id})
+            db.execute("DELETE FROM archive_errors WHERE id = :id", {"id": post_id})
+            db.commit()
+            print("Archive successful")
+        except ArchiveError as e:
+            db.execute(table.fail_query, {"id": post_id, "fail_code": e.code})
+            db.execute(
+                """INSERT INTO archive_errors (id, permalink, table_name, error, link)
+                VALUES (:id, :permalink, :table, :error, :link)
+                ON CONFLICT DO UPDATE SET error = :error, link = :link, table_name = :table""",
+                {
+                    "id": post_id,
+                    "permalink": post_link,
+                    "table": table.name,
+                    "error": e.error,
+                    "link": e.url,
+                },
+            )
+            db.commit()
+            print(f"Download failed: {e.__class__.__name__}")
 
 
 def main(update: bool = False) -> None:
     if update:
         update_db()
-    r = praw.Reddit(
+    reddit = praw.Reddit(
         client_id=os.environ.get("REDDIT_CLIENT_ID"),
         client_secret=os.environ.get("REDDIT_SECRET"),
         user_agent=os.environ.get("REDDIT_USER_AGENT"),
         username=os.environ.get("REDDIT_USERNAME"),
         password=os.environ.get("REDDIT_USER_PASSWORD"),
     )
-    archive_table(r, table=TABLES["saved_posts"])
+    with sqlite3.connect(DB_PATH) as db:
+        archive_table(db=db, reddit=reddit, table=TABLES["saved_posts"])
 
 
 if __name__ == "__main__":
